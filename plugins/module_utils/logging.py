@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Copyright: (c) 2020, Sebastian Gmeiner <sebastian@gmeiner.eu>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from enum import Enum
 from datetime import datetime
