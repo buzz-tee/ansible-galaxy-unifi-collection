@@ -1,0 +1,5 @@
+---
+requires_ansible: ">=2.8"
+plugin_routing:
+import_redirection:
+...
