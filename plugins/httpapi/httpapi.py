@@ -231,7 +231,7 @@ class HttpApi(HttpApiBase):
         :type response_text: str
         """
         headers = self.connection._auth if self.connection._auth else {}
-        headers['Content-Type'] = 'application/json'
+        headers['content-type'] = 'application/json'
 
         if 'set-cookie' in response.headers:
             cookies = []
@@ -239,10 +239,10 @@ class HttpApi(HttpApiBase):
                 cookie = cookie.split(';')[0]
                 if '=' in cookie:
                     cookies.append(cookie.strip())
-            headers['Cookie'] = ','.join(cookies)
+            headers['cookie'] = ','.join(cookies)
 
         if 'x-csrf-token' in response.headers:
-            headers['X-Csrf-Token'] = response.headers['x-csrf-token']
+            headers['x-csrf-token'] = response.headers['x-csrf-token']
         
         return headers
 
