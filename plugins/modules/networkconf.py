@@ -74,15 +74,18 @@ networkconf:
 '''
 
 from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi import UniFi
+from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi_api import networkconf
 
 
-def preprocess_networkconf(unifi, networkconf):
-    if 'vlan' in networkconf:
-        networkconf['vlan_enabled'] = True
-    if 'purpose' not in networkconf:
-        networkconf['purpose'] = 'corporate'
-    if 'networkgroup' not in networkconf:
-        networkconf['networkgroup'] = 'LAN'
+def preprocess_networkconf(unifi, input):
+    if 'vlan' in input:
+        input['vlan_enabled'] = True
+    if 'purpose' not in input:
+        input['purpose'] = 'corporate'
+    if 'networkgroup' not in input:
+        input['networkgroup'] = 'LAN'
+    return [input]
+        
 
 def compare_networkconf(net_a, net_b):
     if net_a.get('purpose', 'corporate') != net_b.get('purpose', 'corporate'):
@@ -103,7 +106,7 @@ def compare_networkconf(net_a, net_b):
 
     return net_a['name'].lower() == net_b['name'].lower()
 
-def preprocess_update_networkconf(input, existing):
+def prepare_update_networkconf(input, existing):
   if 'ip_subnet' in input and \
       'dhcpd_start' not in input and \
       'dhcpd_stop' not in input and \
@@ -125,8 +128,7 @@ def preprocess_update_networkconf(input, existing):
 def main():
     # define available arguments/parameters a user can pass to the module
     module_args = dict(
-        networkconf=dict(type='dict', required=True),
-        **UniFi.DEFAULT_ARGS
+        networkconf=dict(type='dict', required=True)
     )
 
     # initialize UniFi helper object
@@ -134,10 +136,10 @@ def main():
 
     # ensure that the input item will be reflected in the requested state
     # on the UniFi controller
-    unifi.ensure_item('networkconf',
+    unifi.ensure_item(networkconf,
                       preprocess_item=preprocess_networkconf,
-                      compare=compare_networkconf,
-                      preprocess_update=preprocess_update_networkconf)
+                      compare_items=compare_networkconf,
+                      prepare_update=prepare_update_networkconf)
 
     # return the results
     unifi.exit()

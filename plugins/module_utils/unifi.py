@@ -4,15 +4,17 @@
 # Copyright: (c) 2020, Sebastian Gmeiner <sebastian@gmeiner.eu>
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-from json import loads as json_loads, dumps as json_dumps
 from traceback import format_exc
 from os import environ
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.connection import Connection
 
+from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi_api import ApiDescriptor
 from ansible_collections.gmeiner.unifi.plugins.module_utils.logging import \
-    Logger
+    Logger, LogLevel
+
+
 
 class UniFi(object):
     """
@@ -38,7 +40,7 @@ class UniFi(object):
 
     #: default parameters the UniFi Ansible module should accept
     DEFAULT_ARGS = dict(
-        debug=dict(type='int', default=Logger.LEVEL_DISABLED.value),
+        debug=dict(type='str', default=LogLevel.DISABLED.name),
         state=dict(choices=['present','absent','ignore'], default='present'),
         site=dict(type='str', required=False, default='default')
     )
@@ -48,25 +50,39 @@ class UniFi(object):
     #: the key that identifies attributes which are missing
     __MISSING_KEY = '__missing__'
 
-    #: how item types match to requests to the UniFi REST API
-    __API_CONFIG = {
-        'site': { 'request_kwargs': {
-            'path': '/sites', 'path_prefix': '/api/', 'site': 'self',
-            'proxy': 'network' } },
-        'get_settings': { 'request_kwargs': {
-            'path': '/get/setting', 'proxy': 'network' } },
-        'settings': { 'request_kwargs': {
-            'path': '/set/setting', 'proxy': 'network' },
-            'getter': 'get_settings' },
-        'device': { 'request_kwargs': { 'path': '/stat/device',
-            'proxy': 'network' } },
-        'networkconf': { 'request_kwargs': { 'path': '/rest/networkconf',
-            'proxy': 'network' } },
-        'portconf': { 'request_kwargs': { 'path': '/rest/portconf',
-            'proxy': 'network' } },
-        'ccode': { 'request_kwargs': { 'path': '/stat/ccode',
-            'proxy': 'network' } },
-    }
+    @classmethod
+    def default_id_extractor(cls, item):
+        return item['_id']
+
+    @classmethod
+    def name_comparator(cls, item_a, item_b):
+        """
+        Shorthand method which compares two items by their names
+
+        :param item_a: the first item
+        :type item_a: dict:
+        'param item_b: the second item
+        :type item_b: dict:
+
+        :rtype: bool
+        """
+        return 'name' in item_a and 'name' in item_b and \
+            item_a['name'].lower() == item_b['name'].lower()
+
+    @classmethod
+    def build_id_comparator(cls, id_extractor):
+        """
+        Shorthand method which compares two items by their id's
+
+        :param item_a: the first item
+        :type item_a: dict:
+        'param item_b: the second item
+        :type item_b: dict:
+
+        :rtype: bool
+        """
+        return lambda item_a, item_b: id_extractor(item_a) == id_extractor(item_b)
+    
 
     @classmethod
     def set_missing(cls, item, attribute):
@@ -113,12 +129,18 @@ class UniFi(object):
             constructor of AnsibleModule
         """
         module_specs['supports_check_mode'] = True
+        argument_spec = module_specs.get('argument_spec', {})
+        for key, value in UniFi.DEFAULT_ARGS.items():
+            if key not in argument_spec:
+                argument_spec[key] = value
+        module_specs['argument_spec'] = argument_spec
+
         self.__module = AnsibleModule(**module_specs)
 
         self.__result = result if result is not None else UniFi.__RESULT_STUB
         self.__connection = None
         self.__logger = Logger(
-            self.param('debug', Logger.LEVEL_DISABLED),
+            LogLevel[self.param('debug')],
             environ.get('ANSIBLE_UNIFI_LOG_PATH')
         )
         self.error = self.__logger.error
@@ -357,7 +379,7 @@ class UniFi(object):
             pass
         self.__module.fail_json(msg=message, **self.__result)
 
-    def update_item(self, input_item, existing_item, require_absent, preprocess_update):
+    def update_item(self, input_item, existing_item, require_absent, prepare_update):
         """
         Convenience method to verify if an (existing) item matches another
         (input) item by all attributes of the (input) item and update the former
@@ -377,8 +399,8 @@ class UniFi(object):
         """
         changed = False
 
-        if preprocess_update:
-            preprocess_update(input_item, existing_item)
+        if prepare_update:
+            prepare_update(input_item, existing_item)
 
         for key, value in input_item.items():
             if key not in existing_item or existing_item[key] != value:
@@ -397,108 +419,7 @@ class UniFi(object):
         return changed
 
 
-    def update_list(self, input_item, existing_items, state, compare=None, preprocess_update=None):
-        """
-        Convenience method that updates a list of (existing) items to contain an
-        (input) item in a desired state.
-
-        Valid states include the Ansible states 'present' and 'absent' as well
-        as 'ignore' or None (only lists matching items), True (same as present),
-        False (same as absent)
-
-        :raises ValueError: if not no valid (Ansible) state is passed
-
-        :param input_item: the item which contains the desired state
-        :type input_item: dict
-        :param existing_items: the existing items which should be verified
-        :type existing_items: list
-        :param state: a valid (Ansible) state
-        :type state: str
-        :param compare: an optional function that accepts two items as
-            parameters and checks if an existing item matches the input item, if
-            ommited items will be compared by name (case invariant)
-        :type compare: function
-
-        :returns:
-            - ignored_items (:py:class:`list`) - the list of ignored items
-              (those which only match but should neither be changed nor deleted)
-            - changed_items (:py:class:`list`) - the list items that should be
-              changed or created
-            - deleted_items (:py:class:`list`) - the list of _id values of all
-              the items that should be deleted
-        """
-        def _do_compare(existing_item, compare):
-            """
-            Inner shorthand method which either calls the passed compare
-            function or compares the passed existing item to the input item
-            based on the name attributes. The method is used to determine which
-            existing item (if any) from a list of all existing items should be
-            affected by the surrounding update method.
-
-            Note: the input_item does not change throughout that process and is
-            retrieved from the scope of the surrounding method.
-
-            :param existing_item: the existing item that should be matched
-                against the input item
-            :type existing_item: dict
-            :param compare: a custom compare function which accepts two items
-                and returns True if the check succeeds
-            :type compare: function:
-            :returns: the result of the comparison, True if the input item
-                matches the existing item
-            :rtype: bool
-            """
-            if compare:
-                return compare(input_item, existing_item)
-            else:
-                return ('name' in input_item and 'name' in existing_item and
-                        input_item['name'].lower() == existing_item['name'].lower())
-        
-        matching_items = list(
-            filter(lambda x: _do_compare(x, compare), existing_items)
-        )
-        if not matching_items and compare is not None:
-            # second attempt, compare by name only
-            self.trace('No matches, fallback to comparison by name')
-            matching_items = list(
-                filter(lambda x: _do_compare(x, None), existing_items)
-            )
-        self.debug('Got {count} match(es) for input item',
-                   count=len(matching_items))
-
-        ignored_items = []
-        changed_items = []
-        deleted_items = []
-
-        if state in ['ignore', None]:
-            for matching_item in matching_items:
-                ignored_items.append(matching_item)
-
-        elif state in ['present', True]:
-            require_absent = UniFi.pop_missing(input_item)
-
-            if matching_items:
-                for matching_item in matching_items:
-                    changed = self.update_item(input_item, matching_item,
-                                               require_absent, preprocess_update)
-            
-                    if changed:
-                        changed_items.append(matching_item)
-            else:
-                changed_items.append(input_item)
-
-        elif state in ['absent', False]:
-            for matching_item in matching_items:
-                deleted_items.append(matching_item['_id'])
-
-        else:
-            raise ValueError('Got unexpected value for requested state: {state}'
-                             .format(state=state))
-
-        return ignored_items, changed_items, deleted_items
-
-
-    def ensure_item(self, item_type, preprocess_item=None, compare=None, preprocess_update=None):
+    def ensure_item(self, api: ApiDescriptor, preprocess_item=None, compare_items=None, prepare_update=None):
         """
         Convenience method to ensure the provided item state is reflected by the
         corresponding object on the UniFi controller.
@@ -517,12 +438,13 @@ class UniFi(object):
             object and the item that was retrieved from the Ansible module
             paramters to preprocess the item for further operation
         :type preprocess_item: function
-        :param compare: optional callback function that compares two items based
-            on custom attributes, if ommitted the default comparison checks two
-            items based on their name attributes (case invariant)
+        :param compare_items: optional callback function that compares two items
+            based on custom attributes, if ommitted the default comparison checks
+            two items based on their name attributes (case invariant)
         :type compare: function
         """
-        def _set_result(result_item):
+
+        def _set_result(result_item, changed):
             """
             Inner shorthand method which appends a resulting item to the
             appropriate list in the result structure. Creates the list if it is
@@ -531,48 +453,87 @@ class UniFi(object):
             :param result_item: the result item that should be appended to the
                 result list
             :type result_item: dict:
+            :param changed: indicates that the item was changed
+            :type changed: bool:
             """
-            result_data = self.__result.get(item_type, [])
+            result_data = self.__result.get(api.param_name, [])
             if isinstance(result_item, list):
                 result_data.extend(result_item)
             else:
                 result_data.append(result_item)
-            self.__result[item_type] = result_data
+            self.__result[api.param_name] = result_data
+            self.__result['changed'] = (changed or self.__result.get('changed', False))
+
+
+        def _state_ignore(input_item, matching_items):
+            for matching_item in matching_items:
+                _set_result(matching_item, False)
+        
+        def _state_present(input_item, matching_items):
+            require_absent = UniFi.pop_missing(input_item)
+
+            if matching_items:
+                for matching_item in matching_items:
+                    changed = self.update_item(input_item, matching_item,
+                                            require_absent, prepare_update)
+            
+                    if changed and not self.check_mode:
+                        matching_item = self.send(api=api, data=matching_item,
+                                                _id=api.extract_id(matching_item))
+                    _set_result(matching_item, changed and not self.check_mode)
+            else:
+                if not self.check_mode:
+                    input_item = self.send(api=api, data=input_item)
+                _set_result(input_item, not self.check_mode)
+        
+        def _state_absent(input_item, matching_items):
+            for matching_item in matching_items:
+                if not self.check_mode:
+                    self.send(api=api, _id=api.extract_id(matching_item))
+                _set_result(matching_item, not self.check_mode)
 
         try:
-            item = self.param(item_type)
+            match self.param('state'):
+                case 'ignore' | None:
+                    state_handler = _state_ignore
+                case 'present' | True:
+                    state_handler = _state_present
+                case 'absent' | False:
+                    state_handler = _state_absent
+                case other_state:
+                    raise ValueError(f'Got unexpected value for requested state: {other_state}')
+
+            existing_items = self.send(api=api.getter)
+
             if preprocess_item:
-                preprocess_item(self, item)
-            
-            existing_items = self.send(item_type=item_type)
+                input_items = preprocess_item(self, self.param(api.param_name))
+                if not isinstance(input_items, list):
+                    input_items = [input_items]
+            else:
+                input_items = [self.param(api.param_name)]
 
-            ignored_items, changed_items, deleted_items = self.update_list(
-                item, existing_items, self.param('state'), compare=compare,
-                preprocess_update=preprocess_update)
-            
-            changed = False
+            for input_item in input_items:
+                self.trace(f'Preparing input item {input_item}')
+                comparators = [UniFi.name_comparator, UniFi.build_id_comparator(api.extract_id)]
+                if compare_items:
+                    comparators.append(compare_items)
 
-            for item in ignored_items:
-                _set_result(item)
-            for item in changed_items:
-                if not self.check_mode:
-                    item = self.send(item_type=item_type, data=item)
-                    changed = True
-                _set_result(item)
-            for item in deleted_items:
-                if not self.check_mode:
-                    self.send(item_type=item_type, _id=item)
-                    changed_items = True
-                _set_result(item)
+                matching_items = []
+                while not matching_items and comparators:
+                    comparator = comparators.pop()
+                    self.trace(f'Comparing items using {comparator}')
+                    matching_items = list(filter(lambda existing_item: 
+                        comparator(input_item, existing_item), existing_items))
 
-            self.__result['changed'] = (changed or self.__result['changed'])
+                self.trace('Processing input item')
+                state_handler(input_item, matching_items)
 
         except Exception as e:
             if self.__logger.enabled:
                 self.__result['trace'] = format_exc()
             self.fail(str(e))
 
-    def send(self, path=None, item_type=None, site=None, result_path=['data'], **kwargs):
+    def send(self, path=None, api: ApiDescriptor=None, site=None, result_path=['data'], **kwargs):
         """
         Convenience method that sends a request to the UniFi REST API.
 
@@ -599,12 +560,8 @@ class UniFi(object):
         :rtype: dict
         """
 
-        if not path and item_type:
-            if not item_type in UniFi.__API_CONFIG:
-                self.fail('No API configuration found for type {item}',
-                          item=item_type)
-
-            request_kwargs = UniFi.__API_CONFIG[item_type]['request_kwargs']
+        if not path and api:
+            request_kwargs = api.request_kwargs
 
             for key, value in request_kwargs.items():
                 if key not in kwargs:

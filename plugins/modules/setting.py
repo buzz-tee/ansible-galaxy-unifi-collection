@@ -5,8 +5,6 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import (absolute_import, division, print_function)
-from ipaddress import ip_interface, ip_address
-from itertools import islice
 
 __metaclass__ = type
 
@@ -44,61 +42,41 @@ settings:
 '''
 
 from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi import UniFi
+from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi_api import settings, ccode
 
 
-def preprocess_setting(unifi, setting):
-    pass
+def preprocess_settings(unifi: UniFi, settings):
+    result = []
+    for key, value in settings.items():
+        value['key'] = key
 
-def compare_setting(setting_a, setting_b):
-    pass
+        if key == 'country' and 'code' in value:
+            ccodes = unifi.send(api=ccode)
+            code = next(filter(lambda x: x.get('key', None)
+                        == value['code'], ccodes), {}).get('code')
+            if code is None:
+                raise Exception('No such country code: ' + value)
+            value['code'] = code
 
-def preprocess_update_setting(input, existing):
-    pass
+        result.append(value)
+    return result
+
+def compare_settings(setting_a, setting_b):
+    return 'key' in setting_a and 'key' in setting_b and setting_a['key'] == setting_b['key']
+
 
 def main():
     # define available arguments/parameters a user can pass to the module
     module_args = dict(
-        settings=dict(type='dict', required=True),
-        **UniFi.DEFAULT_ARGS
+        settings=dict(type='dict', required=True)
     )
 
     # initialize UniFi helper object
     unifi = UniFi(argument_spec=module_args)
 
-    unifi.result['changed'] = False
-
-    state = unifi.param('state')
-    settings = unifi.send(item_type='get_settings')
-    input_settings = unifi.param('settings', True)
-    for section, section_settings in input_settings.items():
-      setting = next(filter(lambda x: x.get('key') == section, settings), None)
-      
-      changed = False
-      for key, value in section_settings.items():
-        if state == 'present' and section == 'country' and key == 'code':
-          ccodes = unifi.send(item_type='ccode')
-          code = next(filter(lambda x: x.get('key', None) == value, ccodes), {}).get('code')
-          if code is None:
-            raise Exception('No such country code: ' + value)
-          value = code
-
-        if state == 'present' and setting.get(key) != value:
-          setting[key] = value
-          changed = True
-        elif state == 'absent' and key in setting:
-          setting[key] = ''
-          changed = True
-
-      if changed:
-        setting = unifi.send(item_type='settings', data=setting, _id=section)
-        unifi.result['changed'] = True
-
-      result = unifi.result.get('settings', [])
-      if isinstance(setting, list):
-        result.extend(setting)
-      else:
-        result.append(setting)
-      unifi.result['settings'] = result
+    unifi.ensure_item(settings,
+                      preprocess_item=preprocess_settings,
+                      compare_items=compare_settings)
 
     # return the results
     unifi.exit()
