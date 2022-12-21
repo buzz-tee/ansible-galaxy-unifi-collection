@@ -66,98 +66,36 @@ portconf:
 '''
 
 from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi import UniFi
+from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi_api import wlanconf, apgroups
 
+def preprocess_wlanconf(unifi: UniFi, input):
+    # TODO resolve ap_group_ids
+    # if ap_group_ids is missing on input -> use attr_hidden_id = default
+    # else for each resolve to _id of apgroup entry
 
-def get_networkconf_id(network, networks):
-    network_filter = (lambda x: x.get('purpose', 'corporate') == 'corporate' and
-                      x['name'] == network) if isinstance(network, str) else \
-                     (lambda x: x.get('purpose', 'corporate') == 'corporate' and
-                      x.get('vlan', None) == str(network))
-    for n in networks:
-        if network_filter(n):
-            return n['_id']
-    return None
+    ap_groups = unifi.send(api=apgroups)
+    unifi.debug(f'Got AP Groups {ap_groups}')
 
-
-def preprocess_portconf(unifi, portconf):
-    site_id = unifi.get_site_id()
-    if site_id is None:
-        unifi.fail('Could not determine site for port profile {portconf}',
-                   portconf=portconf['name'])
-    portconf['site_id'] = site_id
-
-    networkconfs = unifi.send('/rest/networkconf')
-
-    portconf['forward'] = 'disabled'
-
-    # lookup native network
-    native_networkconf = portconf.pop('native_networkconf', None)
-    if native_networkconf:
-        native_networkconf_id = get_networkconf_id(native_networkconf,
-                                                   networkconfs)
-        if native_networkconf_id is None:
-            unifi.fail('Could not determine native network for port '
-                            'profile {portconf}', portconf=portconf['name'])
-        portconf['native_networkconf_id'] = native_networkconf_id
-        portconf['forward'] = 'native'
-    else:
-        portconf['native_networkconf_id'] = ''
-
-    # lookup tagged networks
-    tagged_networkconfs = portconf.pop('tagged_networkconfs', None)
-    if tagged_networkconfs:
-        if tagged_networkconfs == 'all':
-            # tagged_networkconf_ids = [n['_id'] for n in networkconfs
-            #                           if n['purpose'] == 'corporate']
-            # portconf['tagged_networkconf_ids'] = tagged_networkconf_ids
-            portconf['forward'] = 'all'
-        else:
-            tagged_networkconf_ids = [
-                get_networkconf_id(tagged_networkconf, networkconfs)
-                for tagged_networkconf in tagged_networkconfs
-            ]
-            if None in tagged_networkconf_ids:
-                unifi.fail('Could not determine all tagged networks for '
-                           'port profile {portconf}', portconf=portconf['name'])
-            if 'native_networkconf_id' in portconf and \
-                    portconf['native_networkconf_id'] in tagged_networkconf_ids:
-                tagged_networkconf_ids.remove(portconf['native_networkconf_id'])
-            portconf['tagged_networkconf_ids'] = tagged_networkconf_ids
-            portconf['forward'] = 'customize'
-    else:
-        portconf['tagged_networkconf_ids'] = []
-
-    # update the PoE mode
-    poe_mode = portconf.pop('poe_mode', 'unchanged')
-    if UniFi.find_invariant(poe_mode, [None, 'unchanged']):
-        UniFi.set_missing(portconf, 'poe_mode')
-    elif UniFi.find_invariant(poe_mode, [False, 'off']):
-        portconf['poe_mode'] = 'off'
-    elif UniFi.find_invariant(poe_mode, [True, 'on', 'poe', 'auto']):
-        portconf['poe_mode'] = 'auto'
-    else:
-        unifi.fail('Could not determine PoE mode for port '
-                   'profile {portconf}', portconf=portconf['name'])
-
+    return [input]
 
 def main():
     # define available arguments/parameters a user can pass to the module
-    module_args = dict(
-        portconf=dict(type='dict', required=True),
-        **UniFi.DEFAULT_ARGS
-    )
+    module_args = {
+        wlanconf.param_name: {
+            'type': 'dict', 'required':True
+        }
+    }
 
     # initialize UniFi helper object
     unifi = UniFi(argument_spec=module_args)
 
     # ensure that the input item will be reflected in the requested state
     # on the UniFi controller
-    unifi.ensure_item('portconf', '/rest/portconf',
-                      preprocess_item=preprocess_portconf)
+    unifi.ensure_item(wlanconf,
+                      preprocess_item=preprocess_wlanconf)
 
     # return the results
     unifi.exit()
-
 
 if __name__ == '__main__':
     main()

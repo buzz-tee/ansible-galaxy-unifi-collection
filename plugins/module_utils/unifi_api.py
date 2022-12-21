@@ -6,11 +6,12 @@
 
 class ApiDescriptor(object):
 
-    def __init__(self, param_name, request_kwargs, id_extractor=None, getter=None):
+    def __init__(self, param_name, request_kwargs, id_extractor=None, getter=None, result_path=None):
         self.__param_name = param_name
         self.__request_kwargs = request_kwargs
         self.__id_extractor = id_extractor
         self.__getter = getter
+        self.__result_path = result_path
 
     @property
     def param_name(self):
@@ -29,6 +30,10 @@ class ApiDescriptor(object):
     @property
     def getter(self):
         return self.__getter or self
+
+    @property
+    def result_path(self):
+        return self.__result_path if self.__result_path is not None else ['data']
 
 site = ApiDescriptor(
             param_name='site',
@@ -70,6 +75,23 @@ networkconf = ApiDescriptor(
             param_name='networkconf',
             request_kwargs={
                 'path': '/rest/networkconf',
+                'proxy': 'network'
+            }
+        )
+
+apgroups = ApiDescriptor(
+            param_name='apgroups',
+            request_kwargs={
+                'path_prefix': '/v2/api/site/',
+                'path': '/apgroups'
+            },
+            result_path=[]
+        )
+
+wlanconf = ApiDescriptor(
+            param_name='wlanconf',
+            request_kwargs={
+                'path': '/rest/wlanconf',
                 'proxy': 'network'
             }
         )

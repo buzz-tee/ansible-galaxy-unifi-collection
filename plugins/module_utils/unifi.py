@@ -567,6 +567,8 @@ class UniFi(object):
                 if key not in kwargs:
                     kwargs[key] = value
             path = kwargs.pop('path')
+            result_path = api.result_path
+            self.debug(f'result path: {result_path}')
 
         if not site:
             site = self.param('site', default='default')
