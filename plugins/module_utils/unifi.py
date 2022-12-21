@@ -14,7 +14,6 @@ from ansible.module_utils.connection import Connection
 from ansible_collections.gmeiner.unifi.plugins.module_utils.logging import \
     Logger
 
-
 class UniFi(object):
     """
     Wraps all interactions with the UniFi controller REST API.
@@ -37,7 +36,7 @@ class UniFi(object):
     :vartype trace: function
     """
 
-    #: default parameters the any UniFi Ansible module should accept
+    #: default parameters the UniFi Ansible module should accept
     DEFAULT_ARGS = dict(
         debug=dict(type='int', default=Logger.LEVEL_DISABLED.value),
         state=dict(choices=['present','absent','ignore'], default='present'),
@@ -54,12 +53,19 @@ class UniFi(object):
         'site': { 'request_kwargs': {
             'path': '/sites', 'path_prefix': '/api/', 'site': 'self',
             'proxy': 'network' } },
+        'get_settings': { 'request_kwargs': {
+            'path': '/get/setting', 'proxy': 'network' } },
+        'settings': { 'request_kwargs': {
+            'path': '/set/setting', 'proxy': 'network' },
+            'getter': 'get_settings' },
         'device': { 'request_kwargs': { 'path': '/stat/device',
             'proxy': 'network' } },
         'networkconf': { 'request_kwargs': { 'path': '/rest/networkconf',
             'proxy': 'network' } },
         'portconf': { 'request_kwargs': { 'path': '/rest/portconf',
-            'proxy': 'network' } }
+            'proxy': 'network' } },
+        'ccode': { 'request_kwargs': { 'path': '/stat/ccode',
+            'proxy': 'network' } },
     }
 
     @classmethod
@@ -351,7 +357,7 @@ class UniFi(object):
             pass
         self.__module.fail_json(msg=message, **self.__result)
 
-    def update_item(self, input_item, existing_item, require_absent):
+    def update_item(self, input_item, existing_item, require_absent, preprocess_update):
         """
         Convenience method to verify if an (existing) item matches another
         (input) item by all attributes of the (input) item and update the former
@@ -365,10 +371,15 @@ class UniFi(object):
         :param require_absent: the names of attributes which may not occur on
             the existing item
         :type require_absent: list
+        :param preprocess_update: perform operations to prepare input item
         :returns: True if the existing item was changed, else False
         :rtype: bool
         """
         changed = False
+
+        if preprocess_update:
+            preprocess_update(input_item, existing_item)
+
         for key, value in input_item.items():
             if key not in existing_item or existing_item[key] != value:
                 changed = True
@@ -386,7 +397,7 @@ class UniFi(object):
         return changed
 
 
-    def update_list(self, input_item, existing_items, state, compare=None):
+    def update_list(self, input_item, existing_items, state, compare=None, preprocess_update=None):
         """
         Convenience method that updates a list of (existing) items to contain an
         (input) item in a desired state.
@@ -469,7 +480,7 @@ class UniFi(object):
             if matching_items:
                 for matching_item in matching_items:
                     changed = self.update_item(input_item, matching_item,
-                                               require_absent)
+                                               require_absent, preprocess_update)
             
                     if changed:
                         changed_items.append(matching_item)
@@ -486,7 +497,8 @@ class UniFi(object):
 
         return ignored_items, changed_items, deleted_items
 
-    def ensure_item(self, item_type, preprocess_item=None, compare=None):
+
+    def ensure_item(self, item_type, preprocess_item=None, compare=None, preprocess_update=None):
         """
         Convenience method to ensure the provided item state is reflected by the
         corresponding object on the UniFi controller.
@@ -528,20 +540,15 @@ class UniFi(object):
             self.__result[item_type] = result_data
 
         try:
-            if not item_type in UniFi.__API_CONFIG:
-                self.fail('No API configuration found for type {item}',
-                          item=item_type)
-
-            request_kwargs = UniFi.__API_CONFIG[item_type]['request_kwargs']
-
             item = self.param(item_type)
             if preprocess_item:
                 preprocess_item(self, item)
             
-            existing_items = self.send(**request_kwargs)
+            existing_items = self.send(item_type=item_type)
 
             ignored_items, changed_items, deleted_items = self.update_list(
-                item, existing_items, self.param('state'), compare=compare)
+                item, existing_items, self.param('state'), compare=compare,
+                preprocess_update=preprocess_update)
             
             changed = False
 
@@ -549,12 +556,12 @@ class UniFi(object):
                 _set_result(item)
             for item in changed_items:
                 if not self.check_mode:
-                    self.send(**request_kwargs, data=item)
+                    item = self.send(item_type=item_type, data=item)
                     changed = True
                 _set_result(item)
             for item in deleted_items:
                 if not self.check_mode:
-                    self.send(**request_kwargs, _id=item)
+                    self.send(item_type=item_type, _id=item)
                     changed_items = True
                 _set_result(item)
 
@@ -565,7 +572,7 @@ class UniFi(object):
                 self.__result['trace'] = format_exc()
             self.fail(str(e))
 
-    def send(self, path, site=None, result_path=['data'], **kwargs):
+    def send(self, path=None, item_type=None, site=None, result_path=['data'], **kwargs):
         """
         Convenience method that sends a request to the UniFi REST API.
 
@@ -591,6 +598,19 @@ class UniFi(object):
         :returns: the UniFi response object
         :rtype: dict
         """
+
+        if not path and item_type:
+            if not item_type in UniFi.__API_CONFIG:
+                self.fail('No API configuration found for type {item}',
+                          item=item_type)
+
+            request_kwargs = UniFi.__API_CONFIG[item_type]['request_kwargs']
+
+            for key, value in request_kwargs.items():
+                if key not in kwargs:
+                    kwargs[key] = value
+            path = kwargs.pop('path')
+
         if not site:
             site = self.param('site', default='default')
 

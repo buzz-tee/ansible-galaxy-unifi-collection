@@ -5,6 +5,8 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import (absolute_import, division, print_function)
+from ipaddress import ip_interface, ip_address
+from itertools import islice
 
 __metaclass__ = type
 
@@ -101,6 +103,24 @@ def compare_networkconf(net_a, net_b):
 
     return net_a['name'].lower() == net_b['name'].lower()
 
+def preprocess_update_networkconf(input, existing):
+  if 'ip_subnet' in input and \
+      'dhcpd_start' not in input and \
+      'dhcpd_stop' not in input and \
+      input['ip_subnet'] != existing.get('ip_subnet'):
+    dhcpd_start = 6
+    dhcpd_stop = -1
+    if 'ip_subnet' in existing and 'dhcpd_start' in existing:
+      dhcpd_start = int(ip_address(existing['dhcpd_start'])) \
+                    - int(ip_interface(existing['ip_subnet']).network.network_address)
+    if 'ip_subnet' in existing and 'dhcpd_stop' in existing:
+      dhcpd_stop = int(ip_address(existing['dhcpd_stop'])) \
+                   - int(ip_interface(existing['ip_subnet']).network.broadcast_address)
+
+    hosts = list(ip_interface(input['ip_subnet']).network.hosts())
+    if dhcpd_start < len(hosts) + dhcpd_stop:
+      input['dhcpd_start'] = format(hosts[dhcpd_start - 1])
+      input['dhcpd_stop'] = format(hosts[dhcpd_stop])
 
 def main():
     # define available arguments/parameters a user can pass to the module
@@ -116,7 +136,8 @@ def main():
     # on the UniFi controller
     unifi.ensure_item('networkconf',
                       preprocess_item=preprocess_networkconf,
-                      compare=compare_networkconf)
+                      compare=compare_networkconf,
+                      preprocess_update=preprocess_update_networkconf)
 
     # return the results
     unifi.exit()

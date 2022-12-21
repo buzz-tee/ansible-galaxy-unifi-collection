@@ -6,7 +6,9 @@
 
 from enum import Enum
 from datetime import datetime
+from functools import total_ordering
 
+@total_ordering
 class LogLevel(Enum):
     '''
     A simple enumeration of log levels
@@ -192,7 +194,7 @@ class Logger(object):
         '''
         if log_level > self.__log_level or log_level <= LogLevel.DISABLED:
             return
-        
+
         timestamp = datetime.now()
 
         if isinstance(log_message, str) and (args or kwargs):
