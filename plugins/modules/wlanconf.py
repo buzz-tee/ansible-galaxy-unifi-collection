@@ -10,57 +10,61 @@ __metaclass__ = type
 
 DOCUMENTATION = r'''
 ---
-module: unifi_portconf
+module: unifi_wlanconf
 version_added: "1.0"
 author: "Sebastian Gmeiner (@bastig)"
-short_description: Defines UniFi switch port profiles
+short_description: Defines UniFi wlan configurations
 description:
-  - This modules provides an interface to define switch port profiles
+  - This modules provides an interface to define wlan configurations
     on a UniFi controller
 extends_documentation_fragment: gmeiner.unifi
 options:
   state:
     description:
-      - Specifies if the switchport profile needs to be added or deleted
+      - Specifies if the wlan configuration needs to be added (default) or
+        deleted
     required: false
     choices: ['present','absent','ignore']
-  portconf:
+  wlans:
     description:
-      - The switch port profile that will be submitted to the controller
+      - A list of wlan configurations that will be submitted to the controller
     required: true
 '''
 
 EXAMPLES = r'''
-- name: Create custom trunk
-  unifi_portconf:
+- name: Create a test wlan
+  gmeiner.unifi.unifi_wlanconf:
     state: present
-    portconf:
-      name: DMZ networks trunk
-      native_networkconf:
-      tagged_networkconfs:
-        - 110
-        - Test 502 network
-      poe_mode: unchanged
+    networks:
+      - name: Test network 503
+        domain_name: test.network.lan
+        ip_subnet: 172.20.100.1/24
+        dhcpd_enabled: false
+        ipv6_interface_type: none
+        dhcpdv6_enabled: false
+        vlan: "503"
+        vlan_enabled: true
+        networkgroup: LAN
+        purpose: corporate
 
-- name: Create access port profile
-  unifi_portconf:
+- name: Change the VLAN id
+  unifi_networkconf:
     state: present
-    portconf:
-      name: LAN access with PoE
-      native_networkconf: 501
-      tagged_networkconfs:
-      poe_mode: on
+    networks:
+      - name: Test network 503
+        vlan: "504"
 
-- name: Delete a port profile
-  unifi_portconf:
+- name: Remove a network
+  unifi_networkconf:
     state: absent
-    portconf:
-      name: DMZ networks trunk
+    networks:
+      - vlan: "504"
+
 '''
 
 RETURN = r'''
-portconf:
-    description: The resulting switch port profile (typically one)
+wlans:
+    description: The resulting wlan configurations
     type: list
     returned: always
 '''
@@ -71,6 +75,8 @@ from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi_api import wla
 def preprocess_wlanconf(unifi: UniFi, wlans):
 
     ap_groups = unifi.send(api=apgroups)
+
+    # TODO resolv networkconf_id
 
     for wlan in wlans:
         if 'ap_group_ids' in wlan:

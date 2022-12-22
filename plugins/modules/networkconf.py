@@ -23,18 +23,20 @@ extends_documentation_fragment: gmeiner.unifi
 options:
   state:
     description:
-      - Specifies if the network configuration needs to be added or deleted
+      - Specifies if the network configuration needs to be added (default) or
+        deleted
     required: false
     choices: ['present','absent','ignore']
   networks:
     description:
-      - A list of network configurations that will be submitted to the controller
+      - A list of network configurations that will be submitted to the
+        controller
     required: true
 '''
 
 EXAMPLES = r'''
 - name: Create a test network
-  unifi_networkconf:
+  gmeiner.unifi.unifi_networkconf:
     state: present
     networks:
       - name: Test network 503
@@ -43,28 +45,28 @@ EXAMPLES = r'''
         dhcpd_enabled: false
         ipv6_interface_type: none
         dhcpdv6_enabled: false
-        vlan: "503"
+        vlan: 503
         vlan_enabled: true
         networkgroup: LAN
         purpose: corporate
 
 - name: Change the VLAN id
-  unifi_networkconf:
+  gmeiner.unifi.unifi_networkconf:
     state: present
     networks:
       - name: Test network 503
-        vlan: "504"
+        vlan: 504
 
 - name: Remove a network
-  unifi_networkconf:
+  gmeiner.unifi.unifi_networkconf:
     state: absent
     networks:
-      - vlan: "504"
+      - vlan: 504
 
 '''
 
 RETURN = r'''
-networkconf:
+networks:
     description: The resulting network configurations
     type: list
     returned: always
@@ -78,6 +80,7 @@ def preprocess_networkconf(unifi, networks):
     for network in networks:
         if 'vlan' in network:
             network['vlan_enabled'] = True
+            network['vlan'] = str(network['vlan'])
         if 'purpose' not in network:
             network['purpose'] = 'corporate'
         if 'networkgroup' not in network:
@@ -99,7 +102,7 @@ def compare_networkconf(net_a, net_b):
         return (
             (not net_a['vlan_enabled'] and not net_b['vlan_enabled']) or
             (net_a['vlan_enabled'] and net_b['vlan_enabled'] and
-             int(net_a['vlan']) == int(net_b['vlan']))
+             net_a['vlan'] == net_b['vlan'])
         )
 
     return net_a['name'].lower() == net_b['name'].lower()
