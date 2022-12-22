@@ -68,21 +68,27 @@ portconf:
 from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi import UniFi
 from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi_api import wlanconf, apgroups
 
-def preprocess_wlanconf(unifi: UniFi, input):
-    # TODO resolve ap_group_ids
-    # if ap_group_ids is missing on input -> use attr_hidden_id = default
-    # else for each resolve to _id of apgroup entry
+def preprocess_wlanconf(unifi: UniFi, wlans):
 
     ap_groups = unifi.send(api=apgroups)
-    unifi.debug(f'Got AP Groups {ap_groups}')
 
-    return [input]
+    for wlan in wlans:
+        if 'ap_group_ids' in wlan:
+            ap_group_ids = []
+            for ap_group_id in wlan['ap_group_ids']:
+                ap_group = next(filter(lambda x: x['name'] == ap_group_id, ap_groups), None)
+                ap_group_ids.append(ap_group['_id'] if ap_group else ap_group_id)
+            wlan['ap_group_ids'] = ap_group_ids
+        else:
+            wlan['ap_group_ids'] = [ap_group['_id'] for ap_group in filter(lambda x: x.get('attr_hidden_id') == 'default', ap_groups)]
+
+    return wlans
 
 def main():
     # define available arguments/parameters a user can pass to the module
     module_args = {
         wlanconf.param_name: {
-            'type': 'dict', 'required':True
+            'type': 'list', 'required': True
         }
     }
 

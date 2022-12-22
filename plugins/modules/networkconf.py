@@ -17,7 +17,7 @@ version_added: "1.0"
 author: "Sebastian Gmeiner (@bastig)"
 short_description: Defines UniFi network configurations
 description:
-  - This modules provides an interface to define network configuration
+  - This modules provides an interface to define network configurations
     on a UniFi controller
 extends_documentation_fragment: gmeiner.unifi
 options:
@@ -26,49 +26,46 @@ options:
       - Specifies if the network configuration needs to be added or deleted
     required: false
     choices: ['present','absent','ignore']
-  networkconf:
+  networks:
     description:
-      - The network configuration that will be submitted to the controller
+      - A list of network configurations that will be submitted to the controller
     required: true
 '''
 
 EXAMPLES = r'''
 - name: Create a test network
   unifi_networkconf:
-    debug: true
     state: present
-    networkconf:
-      name: Test network 503
-      domain_name: test.network.lan
-      ip_subnet: 172.20.100.1/24
-      dhcpd_enabled: false
-      ipv6_interface_type: none
-      dhcpdv6_enabled: false
-      vlan: "503"
-      vlan_enabled: true
-      networkgroup: LAN
-      purpose: corporate
+    networks:
+      - name: Test network 503
+        domain_name: test.network.lan
+        ip_subnet: 172.20.100.1/24
+        dhcpd_enabled: false
+        ipv6_interface_type: none
+        dhcpdv6_enabled: false
+        vlan: "503"
+        vlan_enabled: true
+        networkgroup: LAN
+        purpose: corporate
 
 - name: Change the VLAN id
   unifi_networkconf:
-    debug: true
     state: present
-    networkconf:
-      name: Test network 503
-      vlan: "504"
+    networks:
+      - name: Test network 503
+        vlan: "504"
 
 - name: Remove a network
   unifi_networkconf:
-    debug: true
     state: absent
-    networkconf:
-      vlan: "504"
+    networks:
+      - vlan: "504"
 
 '''
 
 RETURN = r'''
 networkconf:
-    description: The resulting network configurations (typically one)
+    description: The resulting network configurations
     type: list
     returned: always
 '''
@@ -77,14 +74,15 @@ from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi import UniFi
 from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi_api import networkconf
 
 
-def preprocess_networkconf(unifi, input):
-    if 'vlan' in input:
-        input['vlan_enabled'] = True
-    if 'purpose' not in input:
-        input['purpose'] = 'corporate'
-    if 'networkgroup' not in input:
-        input['networkgroup'] = 'LAN'
-    return [input]
+def preprocess_networkconf(unifi, networks):
+    for network in networks:
+        if 'vlan' in network:
+            network['vlan_enabled'] = True
+        if 'purpose' not in network:
+            network['purpose'] = 'corporate'
+        if 'networkgroup' not in network:
+            network['networkgroup'] = 'LAN'
+    return networks
         
 
 def compare_networkconf(net_a, net_b):
@@ -101,7 +99,7 @@ def compare_networkconf(net_a, net_b):
         return (
             (not net_a['vlan_enabled'] and not net_b['vlan_enabled']) or
             (net_a['vlan_enabled'] and net_b['vlan_enabled'] and
-             net_a['vlan'] == net_b['vlan'])
+             int(net_a['vlan']) == int(net_b['vlan']))
         )
 
     return net_a['name'].lower() == net_b['name'].lower()
@@ -127,9 +125,11 @@ def prepare_update_networkconf(input, existing):
 
 def main():
     # define available arguments/parameters a user can pass to the module
-    module_args = dict(
-        networkconf=dict(type='dict', required=True)
-    )
+    module_args = {
+        networkconf.param_name: {
+            'type': 'list', 'required': True
+        }
+    }
 
     # initialize UniFi helper object
     unifi = UniFi(argument_spec=module_args)

@@ -67,9 +67,11 @@ def compare_settings(setting_a, setting_b):
 
 def main():
     # define available arguments/parameters a user can pass to the module
-    module_args = dict(
-        settings=dict(type='dict', required=True)
-    )
+    module_args = {
+        settings.param_name: {
+            'type': 'dict', 'required': True
+        }
+    }
 
     # initialize UniFi helper object
     unifi = UniFi(argument_spec=module_args)

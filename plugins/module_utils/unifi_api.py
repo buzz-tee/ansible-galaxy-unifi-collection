@@ -72,7 +72,7 @@ device = ApiDescriptor(
         )
 
 networkconf = ApiDescriptor(
-            param_name='networkconf',
+            param_name='networks',
             request_kwargs={
                 'path': '/rest/networkconf',
                 'proxy': 'network'
@@ -89,7 +89,7 @@ apgroups = ApiDescriptor(
         )
 
 wlanconf = ApiDescriptor(
-            param_name='wlanconf',
+            param_name='wlans',
             request_kwargs={
                 'path': '/rest/wlanconf',
                 'proxy': 'network'

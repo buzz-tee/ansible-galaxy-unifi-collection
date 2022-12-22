@@ -81,7 +81,13 @@ class UniFi(object):
 
         :rtype: bool
         """
-        return lambda item_a, item_b: id_extractor(item_a) == id_extractor(item_b)
+        def id_comparator(item_a, item_b):
+            try:
+                return id_extractor(item_a) == id_extractor(item_b)
+            except:
+                return False
+
+        return id_comparator
     
 
     @classmethod
@@ -424,16 +430,16 @@ class UniFi(object):
         Convenience method to ensure the provided item state is reflected by the
         corresponding object on the UniFi controller.
 
-        The item is refered to by the item_type which in turns will be used to
+        The item is refered to by the API descriptor which in turns will be
+        used to
 
-        - lookup the input item from the Ansible module parameter with the same
-          name as the item_type
-        - lookup the API config based on item_type as key
+        - lookup the input item from the Ansible module parameter according to
+          information from the API descriptor
         - store the resulting objects in a field of the result object under
           item_type as key
 
-        :param item_type: the name of the item type
-        :type item_type: str
+        :param api: the API descriptor
+        :type api: ApiDescriptor
         :param preprocess_item: optional callback function that accepts this
             object and the item that was retrieved from the Ansible module
             paramters to preprocess the item for further operation
@@ -466,10 +472,30 @@ class UniFi(object):
 
 
         def _state_ignore(input_item, matching_items):
+            """
+            Handles item operation for state 'ignore'.
+            In this case it does nothing and adds the matching items to the
+            result
+
+            :param input_item: the input item
+            :type input_item: dict:
+            :param matching_items: the items which will be affected by input_item
+            :type matching_items: list:
+            """
             for matching_item in matching_items:
                 _set_result(matching_item, False)
         
         def _state_present(input_item, matching_items):
+            """
+            Handles item operation for state 'present'.
+            In this case it ensures an existing item is updated or a new object
+            is created on the controller which represents the input item
+
+            :param input_item: the input item
+            :type input_item: dict:
+            :param matching_items: the items which will be affected by input_item
+            :type matching_items: list:
+            """
             require_absent = UniFi.pop_missing(input_item)
 
             if matching_items:
@@ -487,6 +513,16 @@ class UniFi(object):
                 _set_result(input_item, not self.check_mode)
         
         def _state_absent(input_item, matching_items):
+            """
+            Handles item operation for state 'absent'.
+            In this case it ensures that no configuration exists on the
+            controller which matches the input item
+
+            :param input_item: the input item
+            :type input_item: dict:
+            :param matching_items: the items which will be affected by input_item
+            :type matching_items: list:
+            """
             for matching_item in matching_items:
                 if not self.check_mode:
                     self.send(api=api, _id=api.extract_id(matching_item))
@@ -533,7 +569,7 @@ class UniFi(object):
                 self.__result['trace'] = format_exc()
             self.fail(str(e))
 
-    def send(self, path=None, api: ApiDescriptor=None, site=None, result_path=['data'], **kwargs):
+    def send(self, api: ApiDescriptor, site=None, result_path=['data'], **kwargs):
         """
         Convenience method that sends a request to the UniFi REST API.
 
@@ -544,8 +580,8 @@ class UniFi(object):
         :raises KeyError: if the UniFi response object doesn't match the
             expected structure
 
-        :param path: the path of the REST endpoint
-        :type path: str
+        :param api: the API descriptor
+        :type api: ApiDescriptor
         :param site: the optional name of the site, if ommitted will be taken
             from the Ansible module param
         :type site: str
@@ -560,15 +596,12 @@ class UniFi(object):
         :rtype: dict
         """
 
-        if not path and api:
-            request_kwargs = api.request_kwargs
+        request_kwargs = api.request_kwargs
 
-            for key, value in request_kwargs.items():
-                if key not in kwargs:
-                    kwargs[key] = value
-            path = kwargs.pop('path')
-            result_path = api.result_path
-            self.debug(f'result path: {result_path}')
+        for key, value in request_kwargs.items():
+            if key not in kwargs:
+                kwargs[key] = value
+        path = kwargs.pop('path')
 
         if not site:
             site = self.param('site', default='default')
@@ -576,10 +609,10 @@ class UniFi(object):
         result_item = self.connection.send_request(path=path,
                                                    site=site,
                                                    **kwargs)
-        for attr in result_path:
+        for attr in api.result_path:
             if attr not in result_item:
                 raise KeyError('UniFi API response does not include {path}, '
                                'misses attribute {attr}'
-                               .format(path=', '.join(result_path), attr=attr))
+                               .format(path=', '.join(api.result_path), attr=attr))
             result_item = result_item.get(attr, None)
         return result_item
