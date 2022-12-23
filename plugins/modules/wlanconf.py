@@ -70,23 +70,38 @@ wlans:
 '''
 
 from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi import UniFi
-from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi_api import wlanconf, apgroups
+from ansible_collections.gmeiner.unifi.plugins.module_utils.unifi_api import wlanconf, apgroups, networkconf
 
 def preprocess_wlanconf(unifi: UniFi, wlans):
 
     ap_groups = unifi.send(api=apgroups)
-
-    # TODO resolv networkconf_id
+    networkconfs = unifi.send(api=networkconf)
 
     for wlan in wlans:
-        if 'ap_group_ids' in wlan:
+        if 'ap_group_ids' in wlan or 'ap_groups' in wlan:
             ap_group_ids = []
-            for ap_group_id in wlan['ap_group_ids']:
-                ap_group = next(filter(lambda x: x['name'] == ap_group_id, ap_groups), None)
+            for ap_group_id in wlan.get('ap_group_ids', wlan.get('ap_groups', [])):
+                ap_group = next(filter(lambda x: x['_id'] == ap_group_id or x['name'] == ap_group_id, ap_groups), None)
                 ap_group_ids.append(ap_group['_id'] if ap_group else ap_group_id)
+            wlan.pop('ap_groups', None)
             wlan['ap_group_ids'] = ap_group_ids
         else:
             wlan['ap_group_ids'] = [ap_group['_id'] for ap_group in filter(lambda x: x.get('attr_hidden_id') == 'default', ap_groups)]
+
+        if 'networkconf_id' in wlan or 'networkconf' in wlan:
+            network = wlan.get('networkconf_id', wlan.get('networkconf', None))
+            if isinstance(network, str):
+                network = next(filter(lambda networkconf: networkconf['_id'] == network or networkconf['name'] == network, networkconfs), None)
+            elif isinstance(network, int):
+                network = next(filter(lambda networkconf: networkconf['vlan'] == network, networkconfs), None)
+            else:
+                network = None
+
+            wlan.pop('networkconf', None)
+            if network:
+                wlan['networkconf_id'] = network['_id']
+            else:
+                unifi.info(f'Could not identify network {wlan["networkconf_id"]}')
 
     return wlans
 

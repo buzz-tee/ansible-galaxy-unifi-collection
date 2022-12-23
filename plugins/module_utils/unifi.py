@@ -385,7 +385,7 @@ class UniFi(object):
             pass
         self.__module.fail_json(msg=message, **self.__result)
 
-    def update_item(self, input_item, existing_item, require_absent, prepare_update):
+    def update_item(self, api: ApiDescriptor, input_item, existing_item, require_absent, prepare_update):
         """
         Convenience method to verify if an (existing) item matches another
         (input) item by all attributes of the (input) item and update the former
@@ -411,8 +411,9 @@ class UniFi(object):
         for key, value in input_item.items():
             if key not in existing_item or existing_item[key] != value:
                 changed = True
-                self.debug('Field {key} differs on controller: '
+                self.debug('Field {id}.{key} ({type}) differs on controller: '
                            'expected {expected} but got {value}',
+                           id=api.extract_id(input_item), type=api.param_name,
                            key=key, expected=value,
                            value=existing_item.get(key, '<missing>'))
                 existing_item[key] = value
@@ -500,7 +501,7 @@ class UniFi(object):
 
             if matching_items:
                 for matching_item in matching_items:
-                    changed = self.update_item(input_item, matching_item,
+                    changed = self.update_item(api, input_item, matching_item,
                                             require_absent, prepare_update)
             
                     if changed and not self.check_mode:
